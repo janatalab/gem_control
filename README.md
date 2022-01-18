@@ -1,2 +1,2 @@
-# GEM-PyEns-Example
-Repo used during development of GEM and PyEnsemble integration
+# GEM_PyEns_Example
+Repository used during development of GEM and PyEnsemble integration.
