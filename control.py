@@ -28,6 +28,8 @@ def init_experiment(request):
         form = ExperimentInitForm(request.POST)
 
         if form.is_valid():
+            # Get the session ID from the session cache
+
             # Get the group session
             session = GroupSession.objects.get(pk=session_id)
 
