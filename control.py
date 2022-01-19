@@ -23,7 +23,7 @@ and helps keep the control mechanisms abstract.
 '''
 
 @login_required
-def init_experiment(request, session_id):
+def init_experiment(request):
     if request.method == 'POST':
         form = ExperimentInitForm(request.POST)
 
