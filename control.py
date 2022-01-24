@@ -10,9 +10,12 @@ from django.shortcuts import render
 
 import polling2
 
-from pyensemble.models import GroupSession
+from pyensemble.models import GroupSession, Session, GroupSessionSubjectSession
+from pyensemble.group_views import get_session_id
 
 from .forms import ExperimentInitForm, TrialInitForm
+
+import pdb
 
 ''' 
 A view to initialize the experiment. Rather than having this view pull separately from the experiment presets, 
@@ -29,6 +32,7 @@ def init_experiment(request):
 
         if form.is_valid():
             # Get the session ID from the session cache
+            session_id = get_session_id(request)
 
             # Get the group session
             session = GroupSession.objects.get(pk=session_id)
@@ -36,30 +40,23 @@ def init_experiment(request):
             # Create our context dict from the parameters specified in the form
             params = form.cleaned_data
 
-            # # Generate our trial list (essentialy a timeline)
-            # trial_list
-            # if params['trial_generator'] == 'fully_random':
-            #     # Get our alpha levels
-            #     alphas = params['metronome_alpha']
-
-            #     # Get our number of repeats
-            #     num_repeats = params['repeats']
-
-            # params.update({'trial_list': trial_list})
-
             # Initialize our current context
-            current_context = {
-                'trial_num' = 0,
+            context = {
+                'trial_num': 0,
+                'state': 'initialized',
             }
 
-            params.update('current': current_context)
-
             # Cache our parameters and trial lists to our session cache
-            request.session[session.get_cache_key()]['params'] = params
+            cache_key = session.get_cache_key()
+            request.session[cache_key]['params'] = params
+            request.session[cache_key]['context'] = context
             request.session.modified=True
 
             # Write current experiment context to the group session context (this is what the participant sessions poll to obtain state)
-            session.context = current_context
+            session.context = context
+
+            # Write our parameters to the session parameters
+            session.params = params
 
             # Write our initalized state to the group session object
             session.state = session.States.RUNNING
@@ -80,21 +77,35 @@ def init_experiment(request):
 
     return render(request, template, context)
 
+def end_experiment(request):
+    # Get the session ID from the session cache
+    session_id = get_session_id(request)
+
+    # Get the group session
+    session = GroupSession.objects.get(pk=session_id)
+
+    session.state = session.States.COMPLETED
+    session.save()
+
+    return HttpResponse(status=200)
 
 @login_required
-def init_trial(request, session_id):
+def init_trial(request):
     if request.method == 'POST':
         form = TrialInitForm(request.POST)
 
         if form.is_valid():
+            # Get the session ID from the session cache
+            session_id = get_session_id(request)
+
             # Get the group session
             session = GroupSession.objects.get(pk=session_id)
 
             current_params = form.cleaned_data
 
             # Perform some validation based on designated trial number and cached info
-            session_params = request.session[session.get_cache_key()]
-            cached_trialnum = session_params['current']['trial_num']
+            # session_params = request.session[session.get_cache_key()]
+            cached_trialnum = session.context['trial_num']
 
             if current_params['trial_num'] != cached_trialnum+1:
                 # Return a trial number error. (This should probably be implemented in form field validation)
@@ -102,13 +113,13 @@ def init_trial(request, session_id):
 
             # Wait until all participants have responded for the cached trial
             try:
-                polling2.poll(session.responding_complete(cached_trialnum), step=0.5, timeout=60)
+                polling2.poll(session.users_ready, step=0.5, timeout=60)
             except:
                 return HttpResponseGone()
 
-            session_params['current']['trial_num'] += 1
-            request.session[session.get_cache_key()] = session_params
-            request.session.modified=True
+            # session_params['current']['trial_num'] += 1
+            # request.session[session.get_cache_key()] = session_params
+            # request.session.modified=True
 
             # Set group session context
             current_params.update({'state':'ready'})
@@ -120,29 +131,74 @@ def init_trial(request, session_id):
     else:
         form = TrialInitForm()
 
-    template = 'gem_pyens_example/init_trial.html'
+    template = 'gem_control/init_trial.html'
     context = {
         'form': form
     }
 
     return render(request, template, context)
 
+# Method to indiciate participant readiness and wait until all participants have indicated readiness
+def trial_ready(request, *args, **kwargs):
+    # Get the group session ID from the session cache
+    groupsession_id = get_session_id(request)
+
+    # Get the group session
+    group_session = GroupSession.objects.get(pk=groupsession_id)
+
+    # Get the experiment info from the cache
+    expsessinfo = request.session[group_session.experiment.get_cache_key()]
+
+    # Get the user session
+    user_session = Session.objects.get(pk=expsessinfo['session_id'])
+
+    # Get the conjoint group and user session entry
+    gsus = GroupSessionSubjectSession.objects.get(group_session=group_session, user_session=user_session)
+
+    # Set the state of this user to READY 
+    gsus.state = gsus.States.READY
+    gsus.save()
+    
+    # pdb.set_trace()
+
+    # Now wait until the state in the GroupSession context field has been set to ready
+    # polling2.poll(lambda: get_session_state(request) == 'ready', step=0.5, poll_forever=True)
+
+    return True
 
 @login_required
-def start_trial(request, session_id):
-    set_session_state(request, session_id, 'running')
+def start_trial(request):
+    set_session_state(request, 'running')
 
     return HttpResponse(status=200)
 
 
 @login_required
-def end_trial(request, session_id):
-    set_session_state(request, session_id, 'ended')
+def end_trial(request):
+    set_session_state(request, 'ended')
 
     return HttpResponse(status=200)
 
 
-def set_session_state(request, session_id, state):
+def get_session_state(request):
+    # Get the session ID from the session cache
+    session_id = get_session_id(request)
+
+    # Get the group session
+    session = GroupSession.objects.get(pk=session_id)
+
+    if not session.context:
+        state = 'undefined'
+    else:
+        state = session.context['state']
+
+    return state
+
+
+def set_session_state(request, state):
+    # Get the session ID from the session cache
+    session_id = get_session_id(request)
+
     # Get the group session
     session = GroupSession.objects.get(pk=session_id)
 
