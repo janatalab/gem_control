@@ -10,8 +10,8 @@ from django.shortcuts import render
 
 import polling2
 
-from pyensemble.models import GroupSession, Session, GroupSessionSubjectSession
-from pyensemble.group_views import get_session_id
+from group.models import GroupSession, Session, GroupSessionSubjectSession
+from group.views import get_session_id
 
 from .forms import ExperimentInitForm, TrialInitForm
 
@@ -77,18 +77,6 @@ def init_experiment(request):
 
     return render(request, template, context)
 
-def end_experiment(request):
-    # Get the session ID from the session cache
-    session_id = get_session_id(request)
-
-    # Get the group session
-    session = GroupSession.objects.get(pk=session_id)
-
-    session.state = session.States.COMPLETED
-    session.save()
-
-    return HttpResponse(status=200)
-
 @login_required
 def init_trial(request):
     if request.method == 'POST':
@@ -117,10 +105,6 @@ def init_trial(request):
             except:
                 return HttpResponseGone()
 
-            # session_params['current']['trial_num'] += 1
-            # request.session[session.get_cache_key()] = session_params
-            # request.session.modified=True
-
             # Set group session context
             current_params.update({'state':'ready'})
             session.context = current_params
@@ -138,72 +122,16 @@ def init_trial(request):
 
     return render(request, template, context)
 
-# Method to indiciate participant readiness and wait until all participants have indicated readiness
-def trial_ready(request, *args, **kwargs):
-    # Get the group session ID from the session cache
-    groupsession_id = get_session_id(request)
+# Call group.views.end_groupsession instead
+# def end_experiment(request):
+#     # Get the session ID from the session cache
+#     session_id = get_session_id(request)
 
-    # Get the group session
-    group_session = GroupSession.objects.get(pk=groupsession_id)
+#     # Get the group session
+#     session = GroupSession.objects.get(pk=session_id)
 
-    # Get the experiment info from the cache
-    expsessinfo = request.session[group_session.experiment.get_cache_key()]
+#     session.state = session.States.COMPLETED
+#     session.save()
 
-    # Get the user session
-    user_session = Session.objects.get(pk=expsessinfo['session_id'])
+#     return HttpResponse(status=200)
 
-    # Get the conjoint group and user session entry
-    gsus = GroupSessionSubjectSession.objects.get(group_session=group_session, user_session=user_session)
-
-    # Set the state of this user to READY 
-    gsus.state = gsus.States.READY
-    gsus.save()
-    
-    # pdb.set_trace()
-
-    # Now wait until the state in the GroupSession context field has been set to ready
-    # polling2.poll(lambda: get_session_state(request) == 'ready', step=0.5, poll_forever=True)
-
-    return True
-
-@login_required
-def start_trial(request):
-    set_session_state(request, 'running')
-
-    return HttpResponse(status=200)
-
-
-@login_required
-def end_trial(request):
-    set_session_state(request, 'ended')
-
-    return HttpResponse(status=200)
-
-
-def get_session_state(request):
-    # Get the session ID from the session cache
-    session_id = get_session_id(request)
-
-    # Get the group session
-    session = GroupSession.objects.get(pk=session_id)
-
-    if not session.context:
-        state = 'undefined'
-    else:
-        state = session.context['state']
-
-    return state
-
-
-def set_session_state(request, state):
-    # Get the session ID from the session cache
-    session_id = get_session_id(request)
-
-    # Get the group session
-    session = GroupSession.objects.get(pk=session_id)
-
-    # Set the session state
-    context = session.context
-    context.update({'state': state})
-    session.context = context
-    session.save()
