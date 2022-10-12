@@ -10,8 +10,8 @@ from django.shortcuts import render
 
 import polling2
 
-from pyensemble.models import GroupSession, Session, GroupSessionSubjectSession
-from pyensemble.group_views import get_session_id
+from pyensemble.group.models import GroupSession, Session, GroupSessionSubjectSession
+from pyensemble.group.views import get_session_id
 
 from .forms import ExperimentInitForm, TrialInitForm
 
@@ -117,10 +117,6 @@ def init_trial(request):
             except:
                 return HttpResponseGone()
 
-            # session_params['current']['trial_num'] += 1
-            # request.session[session.get_cache_key()] = session_params
-            # request.session.modified=True
-
             # Set group session context
             current_params.update({'state':'ready'})
             session.context = current_params
@@ -139,7 +135,7 @@ def init_trial(request):
     return render(request, template, context)
 
 # Method to indiciate participant readiness and wait until all participants have indicated readiness
-def trial_ready(request, *args, **kwargs):
+def set_user_ready(request):
     # Get the group session ID from the session cache
     groupsession_id = get_session_id(request)
 
@@ -158,11 +154,6 @@ def trial_ready(request, *args, **kwargs):
     # Set the state of this user to READY 
     gsus.state = gsus.States.READY
     gsus.save()
-    
-    # pdb.set_trace()
-
-    # Now wait until the state in the GroupSession context field has been set to ready
-    # polling2.poll(lambda: get_session_state(request) == 'ready', step=0.5, poll_forever=True)
 
     return True
 
