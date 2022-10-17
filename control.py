@@ -114,7 +114,7 @@ def init_trial(request):
 
             # Wait until all participants have responded for the cached trial
             try:
-                polling2.poll(session.users_ready, step=0.5, timeout=60)
+                polling2.poll(session.group_ready, step=0.5, timeout=60)
             except:
                 return HttpResponseGone()
 
