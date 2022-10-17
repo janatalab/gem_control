@@ -10,7 +10,8 @@ from django.shortcuts import render
 
 import polling2
 
-from pyensemble.group.models import GroupSession, Session, GroupSessionSubjectSession
+from pyensemble.models import Session
+from pyensemble.group.models import GroupSession, GroupSessionSubjectSession
 from pyensemble.group.views import get_session_id
 
 from .forms import ExperimentInitForm, TrialInitForm
