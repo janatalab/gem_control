@@ -2,6 +2,8 @@
 #
 # Methods for setting state during Groove Enhancement Machine (GEM) experiments
 
+import json
+
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 
@@ -15,6 +17,10 @@ from pyensemble.group.models import GroupSession, GroupSessionSubjectSession
 from pyensemble.group import views as group_views
 
 from .forms import ExperimentInitForm, TrialInitForm
+
+
+import logging
+logger = logging.getLogger(__name__)
 
 import pdb
 
@@ -96,8 +102,17 @@ def init_trial(request):
             cached_trialnum = session.context['trial_num']
 
             if current_params['trial_num'] != cached_trialnum+1:
-                # Return a trial number error. (This should probably be implemented in form field validation)
-                return HttpResponseBadRequest()
+                # Return error information to the client
+                context = {
+                    'error': 'TrialNumberMismatch',
+                    'cached_trialnum': cached_trialnum,
+                    'requested_trialnum': current_params['trail_num']
+                }
+
+                # Log the error
+                logger.warning(json.dumps(context, indent=2))
+
+                return HttpResponseBadRequest(json.dumps(context))
 
             # Wait until all participants are ready again on their clients
             group_ready = session.wait_group_ready_client()
