@@ -106,7 +106,7 @@ def init_trial(request):
                 context = {
                     'error': 'TrialNumberMismatch',
                     'cached_trialnum': cached_trialnum,
-                    'requested_trialnum': current_params['trail_num']
+                    'requested_trialnum': current_params['trial_num']
                 }
 
                 # Log the error
