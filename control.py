@@ -109,6 +109,9 @@ def init_trial(request):
                     'requested_trialnum': current_params['trial_num']
                 }
 
+                session.context['trial_num'] = cached_trialnum - 1
+                session.save()
+
                 # Log the error
                 logger.warning(json.dumps(context, indent=2))
 
