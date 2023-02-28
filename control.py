@@ -12,7 +12,7 @@ from django.shortcuts import render
 
 import polling2
 
-from pyensemble.models import Session
+from pyensemble.models import Session, Response
 from pyensemble.group.models import GroupSession, GroupSessionSubjectSession
 from pyensemble.group import views as group_views
 
@@ -51,7 +51,7 @@ def init_experiment(request):
             }
 
             # Cache our parameters and trial lists to our session cache
-            cache_key = session.get_cache_key()
+            cache_key = session.cache_key
             request.session[cache_key]['params'] = params
             request.session[cache_key]['context'] = context
             request.session.modified=True
@@ -98,7 +98,6 @@ def init_trial(request):
             current_params = form.cleaned_data
 
             # Perform some validation based on designated trial number and cached info
-            # session_params = request.session[session.get_cache_key()]
             cached_trialnum = session.context['trial_num']
 
             if current_params['trial_num'] != cached_trialnum+1:
@@ -156,4 +155,35 @@ def end_trial(request):
     response = group_views.end_trial(request)
 
     return response
-  
+
+
+def record_response(request, *args, **kwargs):
+    okay = True
+
+    group_session = group_views.get_group_session(request)
+
+    if group_session:
+        trial_info = group_session.context.get('params',{})
+
+        # Get the user's session
+        user_session = Session.objects.get(pk=kwargs['session_id'])
+
+        # Get the user's responses for this session
+        responses = Response.objects.filter(session=user_session)
+
+        if responses:
+            # Get the response_order of the last submission
+            max_response_order = responses.last().response_order
+
+            # Filter our responses on those
+            responses = responses.filter(response_order=max_response_order)
+
+            # Get the first one and pull the trial_info
+            trial_info = responses.first().trial_info
+
+            # Check whether our group session params match the trial_info
+            # Return False if they do because we don't want to resubmit
+            if trial_info == group_session.context.get('params',{}):
+                okay = False
+
+    return okay
