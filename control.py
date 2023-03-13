@@ -170,7 +170,7 @@ def record_response(request, *args, **kwargs):
     expsessinfo = request.session[expsess_key]
 
     # Get our last response
-    prevous_trial_info = expsessinfo.get('previous_trial_info', None)
+    previous_trial_info = expsessinfo.get('previous_trial_info', None)
 
     '''
         Because we aren't transmitting trial information via the page that the
@@ -190,9 +190,12 @@ def record_response(request, *args, **kwargs):
         # If the current parameters match those that have already been cached, we are trying to resubmit the form, so we should fail
         if previous_trial_info == current_trial_info:
             okay = False
+            if settings.DEBUG:
+                print('Repeated submission ...')
 
         else:
             # Update the previous trial info with the current trial info
             expsessinfo['previous_trial_info'] = current_trial_info
+            request.session.modified = True
 
     return okay
