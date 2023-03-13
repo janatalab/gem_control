@@ -160,30 +160,42 @@ def end_trial(request):
 def record_response(request, *args, **kwargs):
     okay = True
 
+    # Get the user's session
+    session = Session.objects.get(pk=kwargs['session_id'])
+
+    # Get the experiment session info cache key
+    expsess_key = session.experiment.cache_key
+
+    # Retrieve expsessinfo from cache
+    expsessinfo = request.session[expsess_key]
+
+    # Get our last response
+    previous_trial_info = expsessinfo.get('previous_trial_info', None)
+
+    '''
+        Because we aren't transmitting trial information via the page that the
+        participant submits, we can only check in the context of a group session
+        and the parameters set for that group session.
+    '''
     group_session = group_views.get_group_session(request)
 
     if group_session:
-        trial_info = group_session.context.get('params',{})
+        '''
+            Get the currently set trial parameters. These won't change until everyone 
+            signals that they are ready for the next trial after their current forms 
+            are submitted and they've been served a new form.
+        '''
+        current_trial_info = group_session.context.get('params',{})
 
-        # Get the user's session
-        user_session = Session.objects.get(pk=kwargs['session_id'])
+        # If the current parameters match those that have already been cached, we are trying to resubmit the form, so we should fail
+        if previous_trial_info == current_trial_info:
+            okay = False
+            if settings.DEBUG:
+                print('Repeated submission ...')
 
-        # Get the user's responses for this session
-        responses = Response.objects.filter(session=user_session)
-
-        if responses:
-            # Get the response_order of the last submission
-            max_response_order = responses.last().response_order
-
-            # Filter our responses on those
-            responses = responses.filter(response_order=max_response_order)
-
-            # Get the first one and pull the trial_info
-            trial_info = responses.first().trial_info
-
-            # Check whether our group session params match the trial_info
-            # Return False if they do because we don't want to resubmit
-            if trial_info == group_session.context.get('params',{}):
-                okay = False
+        else:
+            # Update the previous trial info with the current trial info
+            expsessinfo['previous_trial_info'] = current_trial_info
+            request.session.modified = True
 
     return okay
