@@ -13,5 +13,6 @@ urlpatterns = [
     path('control/trial/init/', control.init_trial, name='init_trial'),
     path('control/trial/start/', control.start_trial, name='start_trial'),
     path('control/trial/end/', control.end_trial, name='end_trial'),
+    path('control/loop/exit/', control.exit_loop, name='exit_loop'),
 ]
 
