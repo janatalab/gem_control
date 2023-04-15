@@ -156,8 +156,9 @@ def end_trial(request):
 
     return response
 
+
 def exit_loop(request):
-    get_group_session(request).set_group_exit_loop()
+    group_views.get_group_session(request).set_group_exit_loop()
 
     return HttpResponse(status=200)
 
