@@ -117,7 +117,7 @@ def init_trial(request):
                 return HttpResponseBadRequest(json.dumps(context))
 
             # Wait until all participants are ready again on their clients
-            group_ready = session.wait_group_ready_client()
+            group_ready = session.wait_group_ready_client(timeout=60*5)
 
             if not group_ready:
                 return HttpResponseGone()
