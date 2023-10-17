@@ -2,14 +2,22 @@
 
 GEM_MAX_TAPPERS = 4 # should match value specified in GEM/GEMConstants.h
 
+import storages
+import json
+
+import pdb
+
 # GEMDataFile is copied from GEM/GUI/GEMIO.py
 class GEMDataFile:
-    def __init__(self, filepath, nrun, mode="wb+"):
+    def __init__(self, filepath, nrun=0, mode="wb+"):
         self.filepath = filepath
+        self.is_open = False
 
-        self._io = open(filepath, mode)
-        self.is_open = True
-        self.ptr = 0
+        self.open(mode)
+
+        # self._io = open(filepath, mode)
+        # self.is_open = True
+        # self.ptr = 0
 
         self.file_hdr = {}
 
@@ -21,6 +29,17 @@ class GEMDataFile:
 
         self.current_run = 0
 
+    def open(self, mode="wb+"):
+        if not self.is_open:
+            if isinstance(self.filepath, storages.backends.s3.S3File):
+                self._io = self.filepath.open("rb")
+            else:
+                self._io = open(filepath, mode)
+
+            self.is_open = True
+            self.ptr = 0
+
+
     def close(self):
         if self.is_open:
             self.ptr = self._io.tell()
@@ -30,7 +49,11 @@ class GEMDataFile:
 
     def reopen(self):
         if not self.is_open:
-            self._io = open(self.filepath, "r+b")
+            if isinstance(self.filepath, storages.backends.s3.S3File):
+                self._io = self.filepath.open("rb")
+            else:
+                self._io = open(self.filepath, "r+b")
+
             self._io.seek(self.ptr, 0)
             self.is_open = True
 
