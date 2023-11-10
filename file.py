@@ -27,7 +27,7 @@ class GEMDataFileReader:
             if isinstance(self.filepath, storages.backends.s3.S3File):
                 self._io = self.filepath.open(mode)
             else:
-                self._io = open(filepath, mode)
+                self._io = open(self.filepath, mode)
 
             self.is_open = True
             self.ptr = 0
