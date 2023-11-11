@@ -201,20 +201,26 @@ class GEMDataFileReader:
 class GEMRun:
     hdr = {}
     data = []
-    df = None
+    tapper_stats = {}
+    metronome_stats = {}
+    _df = pd.DataFrame()
 
     def __init__(self, parent):
         self.parent = parent
 
-    def get_data_frame(self):
-        if not self.df:
-            self.df = pd.DataFrame(self.data)
+    def __repr__(self):
+        return json.dumps(self.hdr)
 
-        return self.df
+    def get_data_frame(self):
+        if self._df.empty:
+            self._df = pd.DataFrame(self.data)
+
+        return self._df
 
     # Method to make sure that all of the metronome values check out
     def verify_metronome_values(self):
         msec_per_tick = 1/self.hdr['tempo']*60*1000
+        expected_next_met_time = None
 
         print(f'Verifying metronome times for run {self.hdr["run_number"]} ...')
 
@@ -240,13 +246,93 @@ class GEMRun:
 
     # Get the indices of valid tappers
     def get_valid_tapper_idxs(self):
-        return [subject['pad']-1 for subject in self.parent.file_hdr['subject_info']]
+        return [int(subject['pad'])-1 for subject in self.parent.file_hdr['subject_info']]
+
+
+    def get_valid_tapper_ids(self):
+        return [subject['id'] for subject in self.parent.file_hdr['subject_info']]
 
 
     # Calculate various statistics
-    def compute_stats(self):
-        valid_tappers = self.get_valid_tapper_idxs()
+    def compute_stats(self, **kwargs):
+        # Verify our metronome values first
+        self.verify_metronome_values()
 
+        valid_tapper_idxs = self.get_valid_tapper_idxs()
+
+        # Get our data frame
         df = self.get_data_frame()
 
+        # Replace our missing data tag (-32000) with NaN
+        asynchrony_data = df['asynchronies'].apply(replace_missing)
 
+        # Convert asynchrony data to a DataFrame
+        asynchrony_data = pd.DataFrame(dict(zip(asynchrony_data.index, asynchrony_data.values))).T
+
+        # Extract the data for the tappers we actually have
+        asynchrony_data = asynchrony_data.iloc[:, valid_tapper_idxs]
+
+        # Label the columns. Note that the order will appropriately match the order in which the data were extracted using valid_tapper_idxs
+        valid_tapper_ids = self.get_valid_tapper_ids()
+        asynchrony_data.columns = valid_tapper_ids
+
+        #
+        # Calculate per-window statistics
+        #
+
+        # Calculate the mean tapper asynchrony for each window
+        df['mean_tapper_asynchrony'] = asynchrony_data.mean(axis=1, skipna=True)
+
+        # Calculate the std of the tapper asynchronies for each window
+        df['std_tapper_asynchrony'] = asynchrony_data.std(axis=1, skipna=True)
+
+        # Calculate tapper asynchronies relative to the group mean asynchrony
+        asynchrony_rel_group = asynchrony_data.subtract(df['mean_tapper_asynchrony'], axis=0)
+
+
+        # Remove data associated with pacing clicks, so as to exclude this from the per-run statistics
+
+        # Get our number of pacing metronome tones
+        num_pacing_clicks = kwargs.get('num_pacing_clicks', 0)
+
+        asynchrony_data = asynchrony_data.iloc[num_pacing_clicks:,:]
+
+        asynchrony_rel_group = asynchrony_rel_group.iloc[num_pacing_clicks:,:]
+
+        #
+        # Calculate per-run statistics
+        # 
+
+        per_run_subject_stats = pd.DataFrame()
+        per_run_met_stats = {}
+
+        # Get the number of missed taps for each tapper
+        per_run_subject_stats['num_missed'] = asynchrony_data.isna().sum()
+
+        # Calculate each tapper's mean asynchrony relative to the metronome
+        per_run_subject_stats['mean_async_rel_met'] = asynchrony_data.mean(skipna=True)
+
+        # Calculate each tapper's std of the asynchronies relative to the metronome
+        per_run_subject_stats['std_async_rel_met'] = asynchrony_data.std(skipna=True)
+
+        # Calculate each tapper's mean asynchrony relative to the group average
+        per_run_subject_stats['mean_async_rel_grp'] = asynchrony_rel_group.mean(skipna=True)
+
+        # Calculate each tapper's std of the asynchronies relative to the group average
+        per_run_subject_stats['std_async_rel_grp'] = asynchrony_rel_group.std(skipna=True)
+
+        # Calculate the mean metronome adjustment
+        per_run_met_stats['met_adjust_mean'] = df.loc[num_pacing_clicks:,'next_met_adjust'].mean()
+
+        # Calculate the std of metronome adjustments
+        per_run_met_stats['met_adjust_std'] = df.loc[num_pacing_clicks:,'next_met_adjust'].std()
+
+        # Update our stats
+        self.tapper_stats.update(per_run_subject_stats.T.to_dict())
+        self.metronome_stats.update(per_run_met_stats)
+
+        return
+
+
+def replace_missing(values):
+    return [v if v>-32000 else pd.NA for v in values]
