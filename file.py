@@ -1,6 +1,7 @@
 # file.py
 
 GEM_MAX_TAPPERS = 4 # should match value specified in GEM/GEMConstants.h
+MISSING_DATA_VALUE = -32000
 
 import storages
 import json
@@ -20,6 +21,13 @@ class GEMDataFileReader:
 
         # Read the file
         self.read_file()
+
+        # Verify the data
+        clean, verifications = self.verify()
+        if not clean:
+            print(f"Found problems in {self.filepath}")
+            print(verifications)
+
 
     def open(self):
         mode = 'rb'
@@ -172,28 +180,52 @@ class GEMDataFileReader:
             verifications['all_runs_valid'] = False
             all_checks_passed = False
 
-        return verifications
+        return all_checks_passed, verifications
+
+
+    def get_missing_runs(self):
+        if not hasattr(self, "_missing_runs"):
+            self._missing_runs = []
+
+            for idx, run in enumerate(self.run_info):
+                if not run.hdr:
+                    self._missing_runs.append(idx+1)
+
+        return self._missing_runs
+
+
+    def get_invalid_runs(self):
+        if not hasattr(self, "_invalid_runs"):
+            self._invalid_runs = []
+
+            for idx, run in enumerate(self.run_info):
+                try:
+                    run.verify_metronome_values()
+
+                except:
+                    self._invalid_runs.append(run)
+                    continue
+
+        return self._invalid_runs         
+
 
     @property
     def all_run_data_present(self):
-        self._all_run_data_present = True
-
-        if any(not run.data for run in self.run_info):
+        if not hasattr(self, "_all_run_data_present"):
             self._all_run_data_present = False
+
+            if not self.get_missing_runs():
+                self._all_run_data_present = True
 
         return self._all_run_data_present
 
 
     @property
     def all_runs_valid(self):
-        self._all_runs_valid = True
-
-        for run in self.run_info:
-            try:
-                run.verify_metronome_values()
-            except:
-                self._all_runs_valid = False
-                continue
+        if not hasattr(self, "_all_runs_valid"):
+            self._all_runs_valid = False 
+            if not self.get_invalid_runs():
+                self._all_runs_valid = True 
 
         return self._all_runs_valid
     
@@ -201,20 +233,29 @@ class GEMDataFileReader:
 class GEMRun:
     hdr = {}
     data = []
-    df = None
+    tapper_stats = {}
+    metronome_stats = {}
+    _df = pd.DataFrame()
 
     def __init__(self, parent):
         self.parent = parent
 
-    def get_data_frame(self):
-        if not self.df:
-            self.df = pd.DataFrame(self.data)
+        # Create a dataframe 
+        self.get_data_frame()
 
-        return self.df
+    def __repr__(self):
+        return json.dumps(self.hdr)
+
+    def get_data_frame(self):
+        if self._df.empty:
+            self._df = pd.DataFrame(self.data)
+
+        return self._df
 
     # Method to make sure that all of the metronome values check out
     def verify_metronome_values(self):
         msec_per_tick = 1/self.hdr['tempo']*60*1000
+        expected_next_met_time = None
 
         print(f'Verifying metronome times for run {self.hdr["run_number"]} ...')
 
@@ -224,7 +265,7 @@ class GEMRun:
             if expected_next_met_time and expected_next_met_time != curr_met_time:
 
                 time_difference = curr_met_time - expected_next_met_time
-                raise ValueError(f'Window f{idx}: Difference in current and expected metronome times: {time_difference}')
+                raise ValueError(f'Window {idx+1}: Difference in current and expected metronome times: {time_difference}')
 
             expected_next_met_time = curr_met_time + msec_per_tick + window['next_met_adjust']
 
@@ -233,20 +274,102 @@ class GEMRun:
     def false_start(self, num_pacing_clicks=2):
         df = self.get_data_frame()
 
-        false_start = df.iloc[range(0, num_pacing_clicks)]['asynchronies'].map(lambda asynchs: any(asynch!=-32000 for asynch in asynchs)).any()
+        false_start = df.iloc[range(0, num_pacing_clicks)]['asynchronies'].map(lambda asynchs: any(asynch != MISSING_DATA_VALUE for asynch in asynchs)).any()
 
         return false_start
 
 
     # Get the indices of valid tappers
     def get_valid_tapper_idxs(self):
-        return [subject['pad']-1 for subject in self.parent.file_hdr['subject_info']]
+        return [int(subject['pad'])-1 for subject in self.parent.file_hdr['subject_info']]
+
+
+    def get_valid_tapper_ids(self):
+        return [subject['id'] for subject in self.parent.file_hdr['subject_info']]
 
 
     # Calculate various statistics
-    def compute_stats(self):
-        valid_tappers = self.get_valid_tapper_idxs()
+    def compute_stats(self, **kwargs):
+        if self in self.parent._invalid_runs:
+            print(f"Run {self.hdr['run_number']} is invalid. Skipping ...")
+            return
 
+        # Get our tappers
+        valid_tapper_idxs = self.get_valid_tapper_idxs()
+
+        # Get our data frame
         df = self.get_data_frame()
 
+        # Replace our missing data tag (-32000) with NaN
+        asynchrony_data = df['asynchronies'].apply(replace_missing)
 
+        # Convert asynchrony data to a DataFrame
+        asynchrony_data = pd.DataFrame(dict(zip(asynchrony_data.index, asynchrony_data.values))).T
+
+        # Extract the data for the tappers we actually have
+        asynchrony_data = asynchrony_data.iloc[:, valid_tapper_idxs]
+
+        # Label the columns. Note that the order will appropriately match the order in which the data were extracted using valid_tapper_idxs
+        valid_tapper_ids = self.get_valid_tapper_ids()
+        asynchrony_data.columns = valid_tapper_ids
+
+        #
+        # Calculate per-window statistics
+        #
+
+        # Calculate the mean tapper asynchrony for each window
+        df['mean_tapper_asynchrony'] = asynchrony_data.mean(axis=1, skipna=True)
+
+        # Calculate the std of the tapper asynchronies for each window
+        df['std_tapper_asynchrony'] = asynchrony_data.std(axis=1, skipna=True)
+
+        # Calculate tapper asynchronies relative to the group mean asynchrony
+        asynchrony_rel_group = asynchrony_data.subtract(df['mean_tapper_asynchrony'], axis=0)
+
+
+        # Remove data associated with pacing clicks, so as to exclude this from the per-run statistics
+
+        # Get our number of pacing metronome tones
+        num_pacing_clicks = kwargs.get('num_pacing_clicks', 0)
+
+        asynchrony_data = asynchrony_data.iloc[num_pacing_clicks:,:]
+
+        asynchrony_rel_group = asynchrony_rel_group.iloc[num_pacing_clicks:,:]
+
+        #
+        # Calculate per-run statistics
+        # 
+
+        per_run_subject_stats = pd.DataFrame()
+        per_run_met_stats = {}
+
+        # Get the number of missed taps for each tapper
+        per_run_subject_stats['num_missed'] = asynchrony_data.isna().sum()
+
+        # Calculate each tapper's mean asynchrony relative to the metronome
+        per_run_subject_stats['mean_async_rel_met'] = asynchrony_data.mean(skipna=True)
+
+        # Calculate each tapper's std of the asynchronies relative to the metronome
+        per_run_subject_stats['std_async_rel_met'] = asynchrony_data.std(skipna=True)
+
+        # Calculate each tapper's mean asynchrony relative to the group average
+        per_run_subject_stats['mean_async_rel_grp'] = asynchrony_rel_group.mean(skipna=True)
+
+        # Calculate each tapper's std of the asynchronies relative to the group average
+        per_run_subject_stats['std_async_rel_grp'] = asynchrony_rel_group.std(skipna=True)
+
+        # Calculate the mean metronome adjustment
+        per_run_met_stats['met_adjust_mean'] = df.loc[num_pacing_clicks:,'next_met_adjust'].mean()
+
+        # Calculate the std of metronome adjustments
+        per_run_met_stats['met_adjust_std'] = df.loc[num_pacing_clicks:,'next_met_adjust'].std()
+
+        # Update our stats
+        self.tapper_stats.update(per_run_subject_stats.T.to_dict())
+        self.metronome_stats.update(per_run_met_stats)
+
+        return
+
+
+def replace_missing(values):
+    return [v if v > MISSING_DATA_VALUE else pd.NA for v in values]
