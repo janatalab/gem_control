@@ -1,6 +1,7 @@
 # file.py
 
 GEM_MAX_TAPPERS = 4 # should match value specified in GEM/GEMConstants.h
+MISSING_DATA_VALUE = -32000
 
 import storages
 import json
@@ -20,6 +21,13 @@ class GEMDataFileReader:
 
         # Read the file
         self.read_file()
+
+        # Verify the data
+        clean, verifications = self.verify()
+        if not clean:
+            print(f"Found problems in {self.filepath}")
+            print(verifications)
+
 
     def open(self):
         mode = 'rb'
@@ -172,28 +180,52 @@ class GEMDataFileReader:
             verifications['all_runs_valid'] = False
             all_checks_passed = False
 
-        return verifications
+        return all_checks_passed, verifications
+
+
+    def get_missing_runs(self):
+        if not hasattr(self, "_missing_runs"):
+            self._missing_runs = []
+
+            for idx, run in enumerate(self.run_info):
+                if not run.hdr:
+                    self._missing_runs.append(idx+1)
+
+        return self._missing_runs
+
+
+    def get_invalid_runs(self):
+        if not hasattr(self, "_invalid_runs"):
+            self._invalid_runs = []
+
+            for idx, run in enumerate(self.run_info):
+                try:
+                    run.verify_metronome_values()
+
+                except:
+                    self._invalid_runs.append(run)
+                    continue
+
+        return self._invalid_runs         
+
 
     @property
     def all_run_data_present(self):
-        self._all_run_data_present = True
-
-        if any(not run.data for run in self.run_info):
+        if not hasattr(self, "_all_run_data_present"):
             self._all_run_data_present = False
+
+            if not self.get_missing_runs():
+                self._all_run_data_present = True
 
         return self._all_run_data_present
 
 
     @property
     def all_runs_valid(self):
-        self._all_runs_valid = True
-
-        for run in self.run_info:
-            try:
-                run.verify_metronome_values()
-            except:
-                self._all_runs_valid = False
-                continue
+        if not hasattr(self, "_all_runs_valid"):
+            self._all_runs_valid = False 
+            if not self.get_invalid_runs():
+                self._all_runs_valid = True 
 
         return self._all_runs_valid
     
@@ -207,6 +239,9 @@ class GEMRun:
 
     def __init__(self, parent):
         self.parent = parent
+
+        # Create a dataframe 
+        self.get_data_frame()
 
     def __repr__(self):
         return json.dumps(self.hdr)
@@ -230,7 +265,7 @@ class GEMRun:
             if expected_next_met_time and expected_next_met_time != curr_met_time:
 
                 time_difference = curr_met_time - expected_next_met_time
-                raise ValueError(f'Window f{idx}: Difference in current and expected metronome times: {time_difference}')
+                raise ValueError(f'Window {idx+1}: Difference in current and expected metronome times: {time_difference}')
 
             expected_next_met_time = curr_met_time + msec_per_tick + window['next_met_adjust']
 
@@ -239,7 +274,7 @@ class GEMRun:
     def false_start(self, num_pacing_clicks=2):
         df = self.get_data_frame()
 
-        false_start = df.iloc[range(0, num_pacing_clicks)]['asynchronies'].map(lambda asynchs: any(asynch!=-32000 for asynch in asynchs)).any()
+        false_start = df.iloc[range(0, num_pacing_clicks)]['asynchronies'].map(lambda asynchs: any(asynch != MISSING_DATA_VALUE for asynch in asynchs)).any()
 
         return false_start
 
@@ -255,9 +290,11 @@ class GEMRun:
 
     # Calculate various statistics
     def compute_stats(self, **kwargs):
-        # Verify our metronome values first
-        self.verify_metronome_values()
+        if self in self.parent._invalid_runs:
+            print(f"Run {self.hdr['run_number']} is invalid. Skipping ...")
+            return
 
+        # Get our tappers
         valid_tapper_idxs = self.get_valid_tapper_idxs()
 
         # Get our data frame
@@ -335,4 +372,4 @@ class GEMRun:
 
 
 def replace_missing(values):
-    return [v if v>-32000 else pd.NA for v in values]
+    return [v if v > MISSING_DATA_VALUE else pd.NA for v in values]
