@@ -231,14 +231,15 @@ class GEMDataFileReader:
     
 
 class GEMRun:
-    hdr = {}
-    data = []
-    tapper_stats = {}
-    metronome_stats = {}
-    _df = pd.DataFrame()
 
     def __init__(self, parent):
         self.parent = parent
+
+        self.hdr = {}
+        self.data = []
+        self.tapper_stats = {}
+        self.metronome_stats = {}
+        self._df = pd.DataFrame()
 
         # Create a dataframe 
         self.get_data_frame()
