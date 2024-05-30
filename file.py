@@ -239,6 +239,7 @@ class GEMRun:
         self.data = []
         self.tapper_stats = {}
         self.metronome_stats = {}
+        self.group_stats = {}
         self._df = pd.DataFrame()
 
         # Create a dataframe 
@@ -343,6 +344,7 @@ class GEMRun:
 
         per_run_subject_stats = pd.DataFrame()
         per_run_met_stats = {}
+        per_run_group_stats = {}
 
         # Get the number of missed taps for each tapper
         per_run_subject_stats['num_missed'] = asynchrony_data.isna().sum()
@@ -365,9 +367,16 @@ class GEMRun:
         # Calculate the std of metronome adjustments
         per_run_met_stats['met_adjust_std'] = df.loc[num_pacing_clicks:,'next_met_adjust'].std()
 
+        # Calculate the mean of the per-window group sd asynch
+        per_run_group_stats['mean_grp_asynch_per_window'] = df['std_tapper_asynchrony'].mean(skipna=True)
+
+        # Calculate the std of the per-window group sd asynch
+        per_run_group_stats['std_grp_asynch_per_window'] = df['std_tapper_asynchrony'].std(skipna=True)
+
         # Update our stats
         self.tapper_stats.update(per_run_subject_stats.T.to_dict())
         self.metronome_stats.update(per_run_met_stats)
+        self.group_stats.update(per_run_group_stats)
 
         return
 
