@@ -367,11 +367,17 @@ class GEMRun:
         # Calculate the std of metronome adjustments
         per_run_met_stats['met_adjust_std'] = df.loc[num_pacing_clicks:,'next_met_adjust'].std()
 
+        # Calculate the mean of the per-window group mean asynch
+        per_run_group_stats['mean_grp_mean_asynch_per_window'] = df['mean_tapper_asynchrony'].mean(skipna=True)
+
+        # Calculate the std of the per-window group mean asynch
+        per_run_group_stats['std_grp_mean_asynch_per_window'] = df['mean_tapper_asynchrony'].std(skipna=True)
+
         # Calculate the mean of the per-window group sd asynch
-        per_run_group_stats['mean_grp_asynch_per_window'] = df['std_tapper_asynchrony'].mean(skipna=True)
+        per_run_group_stats['mean_grp_std_asynch_per_window'] = df['std_tapper_asynchrony'].mean(skipna=True)
 
         # Calculate the std of the per-window group sd asynch
-        per_run_group_stats['std_grp_asynch_per_window'] = df['std_tapper_asynchrony'].std(skipna=True)
+        per_run_group_stats['std_grp_std_asynch_per_window'] = df['std_tapper_asynchrony'].std(skipna=True)
 
         # Update our stats
         self.tapper_stats.update(per_run_subject_stats.T.to_dict())
